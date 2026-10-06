@@ -1,4 +1,4 @@
-export const metadata = { title: "AiHub Backend" };
+export const metadata = { title: "Orbix AI Backend" };
 
 export default function RootLayout({ children }) {
   return (
