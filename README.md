@@ -26,3 +26,5 @@ npm run dev        # http://localhost:3001/api/health
 
 ## Database (Cloudflare D1) — only when needed
 See the commented block at the bottom of `wrangler.toml`. After binding, `/api/health` reports `db: "connected"` by itself.
+
+test
