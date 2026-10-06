@@ -17,7 +17,7 @@ async function checkTelegram(cfg) {
   const c = await (
     await fetch(`${base}/getChatMember?chat_id=${encodeURIComponent(cfg.channel)}&user_id=${m.result.id}`)
   ).json();
-  if (!c.ok) return "Bot cannot access the channel. Check the channel username and add the bot as admin";
+  if (!c.ok) return "Bot cannot access the channel (" + (c.description || "unknown") + "). Check the channel username and add the bot as admin";
   if (!["administrator", "creator"].includes(c.result.status)) return "The bot must be an admin of the channel";
   return null;
 }
@@ -50,6 +50,9 @@ function normChannel(v) {
   return c;
 }
 
+const rand = (n) =>
+  [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
+
 export async function PUT(request, { params }) {
   const app = APPS[params.app];
   if (!app) return json({ error: "Unknown app" }, 404, request);
@@ -75,6 +78,27 @@ export async function PUT(request, { params }) {
     return json({ error: "Could not reach " + params.app + " to verify the details" }, 502, request);
   }
 
+  // Telegram: register the webhook so every new channel post is sent to this backend automatically
+  if (params.app === "Telegram") {
+    cfg.secret = rand(16);
+    try {
+      const w = await (
+        await fetch(`https://api.telegram.org/bot${cfg.botToken}/setWebhook`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: `${new URL(request.url).origin}/api/tg-webhook/${encodeURIComponent(username)}`,
+            secret_token: cfg.secret,
+            allowed_updates: ["channel_post"],
+          }),
+        })
+      ).json();
+      if (!w.ok) return json({ error: "Webhook: " + (w.description || "failed") }, 400, request);
+    } catch (e) {
+      return json({ error: "Could not set the Telegram webhook" }, 502, request);
+    }
+  }
+
   await env.DB.prepare(
     "INSERT INTO app_configs (username,app,config,updated_at) VALUES (?,?,?,?) " +
       "ON CONFLICT(username,app) DO UPDATE SET config=excluded.config, updated_at=excluded.updated_at"
@@ -90,6 +114,17 @@ export async function DELETE(request, { params }) {
   const { env } = getCloudflareContext();
   const username = await currentUser(env, request);
   if (!username) return json({ error: "Please log in first" }, 401, request);
+  if (params.app === "Telegram") {
+    const row = await env.DB.prepare("SELECT config FROM app_configs WHERE username=? AND app=?")
+      .bind(username, "Telegram")
+      .first();
+    try {
+      const c = row && JSON.parse(row.config);
+      if (c && c.botToken) await fetch(`https://api.telegram.org/bot${c.botToken}/deleteWebhook`);
+    } catch (e) {
+      /* best effort */
+    }
+  }
   await env.DB.prepare("DELETE FROM app_configs WHERE username=? AND app=?").bind(username, params.app).run();
   return json({ ok: true }, 200, request);
 }
