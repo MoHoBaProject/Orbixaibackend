@@ -3,12 +3,12 @@ import { json, preflight } from "../../../lib/cors";
 
 export const dynamic = "force-dynamic";
 
-export function OPTIONS() {
-  return preflight();
+export function OPTIONS(request) {
+  return preflight(request);
 }
 
 // GET /api/health → tells the frontend the backend is alive (and whether the D1 database answers)
-export async function GET() {
+export async function GET(request) {
   let db = "not configured";
   try {
     const { env } = getCloudflareContext();
@@ -23,8 +23,8 @@ export async function GET() {
 
   return json({
     ok: true,
-    service: "ai-hub-backend",
+    service: "orbixai-backend",
     time: new Date().toISOString(),
     db,
-  });
+  }, 200, request);
 }
