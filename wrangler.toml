@@ -1,0 +1,23 @@
+name = "ai-hub-backend"
+compatibility_date = "2025-05-05"
+compatibility_flags = ["nodejs_compat"]
+main = ".open-next/worker.js"
+
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
+
+[vars]
+# Which website may call this backend from the browser (CORS).
+# "*" = any site. Later, set it to the frontend's address, e.g. "https://ai-hub.your-name.workers.dev"
+ALLOWED_ORIGIN = "*"
+
+# ---- Database (Cloudflare D1) — NOT needed yet. When you need one: ----
+# 1) npx wrangler d1 create ai-hub-db        → it prints a database_id
+# 2) remove the "#" from the 4 lines below and paste that id
+# 3) commit + push → /api/health will automatically show  db: "connected"
+#
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "ai-hub-db"
+# database_id = "PASTE_DATABASE_ID_HERE"
