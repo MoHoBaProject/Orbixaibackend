@@ -1,6 +1,6 @@
-# AiHub Backend
+# Orbix AI Backend
 
-Next.js backend for AiHub, deployed on Cloudflare (same pipeline as the frontend).
+Next.js backend for Orbix AI (orbixai.ir), deployed on Cloudflare (same pipeline as the frontend).
 
 ## Endpoints
 - `GET /api/health` → `{ ok, service, time, db }` — `db` is `"not configured"` until a D1 database is bound.
