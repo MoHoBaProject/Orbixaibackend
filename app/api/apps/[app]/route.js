@@ -1,0 +1,95 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { json, preflight } from "../../../../lib/cors";
+
+export const dynamic = "force-dynamic";
+
+export function OPTIONS(request) {
+  return preflight(request);
+}
+
+const TOKEN_RE = /^\d{5,}:[A-Za-z0-9_-]{20,}$/;
+const CHANNEL_RE = /^(@[A-Za-z0-9_]{4,}|-?\d{5,})$/;
+
+async function checkTelegram(cfg) {
+  const base = `https://api.telegram.org/bot${cfg.botToken}`;
+  const m = await (await fetch(base + "/getMe")).json();
+  if (!m.ok) return "Telegram bot token is invalid";
+  const c = await (
+    await fetch(`${base}/getChatMember?chat_id=${encodeURIComponent(cfg.channel)}&user_id=${m.result.id}`)
+  ).json();
+  if (!c.ok) return "Bot cannot access the channel. Check the channel username and add the bot as admin";
+  if (!["administrator", "creator"].includes(c.result.status)) return "The bot must be an admin of the channel";
+  return null;
+}
+
+async function checkBale(cfg) {
+  const m = await (await fetch(`https://tapi.bale.ai/bot${cfg.botToken}/getMe`)).json();
+  if (!m.ok) return "Bale bot token is invalid";
+  return null;
+}
+
+const APPS = {
+  Telegram: { fields: ["botToken", "channel"], check: checkTelegram },
+  Bale: { fields: ["botToken", "channel"], check: checkBale },
+};
+
+function bearer(request) {
+  return (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+}
+
+async function currentUser(env, request) {
+  const t = bearer(request);
+  if (!t) return null;
+  const s = await env.DB.prepare("SELECT username FROM sessions WHERE token=?").bind(t).first();
+  return s ? s.username : null;
+}
+
+function normChannel(v) {
+  let c = String(v || "").trim().replace(/^https?:\/\/(t\.me|ble\.ir)\//i, "");
+  if (/^[A-Za-z]/.test(c)) c = "@" + c;
+  return c;
+}
+
+export async function PUT(request, { params }) {
+  const app = APPS[params.app];
+  if (!app) return json({ error: "Unknown app" }, 404, request);
+
+  const { env } = getCloudflareContext();
+  const username = await currentUser(env, request);
+  if (!username) return json({ error: "Please log in first" }, 401, request);
+
+  const body = await request.json().catch(() => null);
+  const src = (body && body.config) || {};
+  const cfg = {
+    botToken: String(src.botToken || "").trim(),
+    channel: normChannel(src.channel),
+  };
+
+  if (!TOKEN_RE.test(cfg.botToken)) return json({ error: "Bot token format is invalid" }, 400, request);
+  if (!CHANNEL_RE.test(cfg.channel)) return json({ error: "Channel ID is invalid (example: @mychannel)" }, 400, request);
+
+  try {
+    const err = await app.check(cfg);
+    if (err) return json({ error: err }, 400, request);
+  } catch (e) {
+    return json({ error: "Could not reach " + params.app + " to verify the details" }, 502, request);
+  }
+
+  await env.DB.prepare(
+    "INSERT INTO app_configs (username,app,config,updated_at) VALUES (?,?,?,?) " +
+      "ON CONFLICT(username,app) DO UPDATE SET config=excluded.config, updated_at=excluded.updated_at"
+  )
+    .bind(username, params.app, JSON.stringify(cfg), new Date().toISOString())
+    .run();
+
+  return json({ ok: true }, 200, request);
+}
+
+export async function DELETE(request, { params }) {
+  if (!APPS[params.app]) return json({ error: "Unknown app" }, 404, request);
+  const { env } = getCloudflareContext();
+  const username = await currentUser(env, request);
+  if (!username) return json({ error: "Please log in first" }, 401, request);
+  await env.DB.prepare("DELETE FROM app_configs WHERE username=? AND app=?").bind(username, params.app).run();
+  return json({ ok: true }, 200, request);
+}
