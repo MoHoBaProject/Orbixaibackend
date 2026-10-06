@@ -1,4 +1,4 @@
-name = "orbixai-backend"
+name = "orbixaibackend"
 compatibility_date = "2025-05-05"
 compatibility_flags = ["nodejs_compat"]
 main = ".open-next/worker.js"
@@ -9,7 +9,7 @@ binding = "ASSETS"
 
 [vars]
 # Which websites may call this backend from the browser (CORS). Comma-separated list; "*" = any site.
-ALLOWED_ORIGIN = "https://orbixai.ir,https://www.orbixai.ir,http://localhost:3000"
+ALLOWED_ORIGIN = "https://orbixai.ir,https://www.orbixai.ir,https://orbixai.moneymaker-media24.workers.dev,http://localhost:3000"
 
 # ---- Database (Cloudflare D1) — NOT needed yet. When you need one: ----
 # 1) npx wrangler d1 create orbixai-db        → it prints a database_id
