@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { json, preflight } from "../../../../lib/cors";
+import { DEST } from "../../../../lib/destinations";
 
 export const dynamic = "force-dynamic";
 
@@ -7,31 +8,31 @@ export function OPTIONS(request) {
   return preflight(request);
 }
 
-const TOKEN_RE = /^\d{5,}:[A-Za-z0-9_-]{20,}$/;
-const CHANNEL_RE = /^(@[A-Za-z0-9_]{4,}|-?\d{5,})$/;
+const rand = (n) =>
+  [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
-async function checkTelegram(cfg) {
-  const base = `https://api.telegram.org/bot${cfg.botToken}`;
-  const m = await (await fetch(base + "/getMe")).json();
-  if (!m.ok) return "Telegram bot token is invalid";
-  const c = await (
-    await fetch(`${base}/getChatMember?chat_id=${encodeURIComponent(cfg.channel)}&user_id=${m.result.id}`)
-  ).json();
-  if (!c.ok) return "Bot cannot access the channel (" + (c.description || "unknown") + "). Check the channel username and add the bot as admin";
-  if (!["administrator", "creator"].includes(c.result.status)) return "The bot must be an admin of the channel";
-  return null;
-}
-
-async function checkBale(cfg) {
-  const m = await (await fetch(`https://tapi.bale.ai/bot${cfg.botToken}/getMe`)).json();
-  if (!m.ok) return "Bale bot token is invalid";
-  return null;
-}
-
-const APPS = {
-  Telegram: { fields: ["botToken", "channel"], check: checkTelegram },
-  Bale: { fields: ["botToken", "channel"], check: checkBale },
+// Telegram is the source of the posts
+const telegram = {
+  tokenRe: /^\d{5,}:[A-Za-z0-9_-]{20,}$/,
+  channelRe: /^(@[A-Za-z0-9_]{4,}|-?\d{5,})$/,
+  norm: (v) => {
+    let c = String(v || "").trim().replace(/^https?:\/\/t\.me\//i, "");
+    return /^[A-Za-z]/.test(c) ? "@" + c : c;
+  },
+  async check(cfg) {
+    const base = `https://api.telegram.org/bot${cfg.botToken}`;
+    const m = await (await fetch(base + "/getMe")).json();
+    if (!m.ok) return "Telegram bot token is invalid";
+    const c = await (
+      await fetch(`${base}/getChatMember?chat_id=${encodeURIComponent(cfg.channel)}&user_id=${m.result.id}`)
+    ).json();
+    if (!c.ok) return "Bot cannot access the channel (" + (c.description || "unknown") + "). Check the channel username and add the bot as admin";
+    if (!["administrator", "creator"].includes(c.result.status)) return "The bot must be an admin of the channel";
+    return null;
+  },
 };
+
+const APPS = { Telegram: telegram, ...DEST };
 
 function bearer(request) {
   return (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
@@ -43,15 +44,6 @@ async function currentUser(env, request) {
   const s = await env.DB.prepare("SELECT username FROM sessions WHERE token=?").bind(t).first();
   return s ? s.username : null;
 }
-
-function normChannel(v) {
-  let c = String(v || "").trim().replace(/^https?:\/\/(t\.me|ble\.ir)\//i, "");
-  if (/^[A-Za-z]/.test(c)) c = "@" + c;
-  return c;
-}
-
-const rand = (n) =>
-  [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 export async function PUT(request, { params }) {
   const app = APPS[params.app];
@@ -65,11 +57,11 @@ export async function PUT(request, { params }) {
   const src = (body && body.config) || {};
   const cfg = {
     botToken: String(src.botToken || "").trim(),
-    channel: normChannel(src.channel),
+    channel: app.norm(src.channel),
   };
 
-  if (!TOKEN_RE.test(cfg.botToken)) return json({ error: "Bot token format is invalid" }, 400, request);
-  if (!CHANNEL_RE.test(cfg.channel)) return json({ error: "Channel ID is invalid (example: @mychannel)" }, 400, request);
+  if (!app.tokenRe.test(cfg.botToken)) return json({ error: "Bot token format is invalid" }, 400, request);
+  if (!app.channelRe.test(cfg.channel)) return json({ error: "Channel ID is invalid" }, 400, request);
 
   try {
     const err = await app.check(cfg);
@@ -114,6 +106,7 @@ export async function DELETE(request, { params }) {
   const { env } = getCloudflareContext();
   const username = await currentUser(env, request);
   if (!username) return json({ error: "Please log in first" }, 401, request);
+
   if (params.app === "Telegram") {
     const row = await env.DB.prepare("SELECT config FROM app_configs WHERE username=? AND app=?")
       .bind(username, "Telegram")
